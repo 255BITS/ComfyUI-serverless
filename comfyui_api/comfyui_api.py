@@ -15,59 +15,26 @@ import sys
 
 APP_NAME = os.getenv('APP_NAME') if os.getenv('APP_NAME') is not None else 'COMFY_SERVERLESS' # Name of the application
 API_COMMAND_LINE = os.getenv('API_COMMAND_LINE') if os.getenv('API_COMMAND_LINE') is not None else 'python3 ComfyUI/main.py' # Command line to start the API server, e.g. "python3 ComfyUI/main.py"; warning: do not add parameter --port as it will be passed later
-API_URL = os.getenv('API_URL') if os.getenv('API_URL') is not None else '127.0.0.1'  # URL of the API server (warning: do not add the port number to the URL as it will be passed later)
-INITIAL_PORT = int(os.getenv('INITIAL_PORT')) if os.getenv('INITIAL_PORT') is not None else 8188 # Initial port to use when starting the API server; may be changed if the port is already in use
 TEST_PAYLOAD = json.load(open(os.getenv('TEST_PAYLOAD'))) if os.getenv('TEST_PAYLOAD') is not None else json.load(open('test_payload.json')) # The TEST_PAYLOAD is a JSON object that contains a prompt that will be used to test if the API server is running
 MAX_COMFY_START_ATTEMPTS = int(os.getenv('MAX_COMFY_START_ATTEMPTS')) if os.getenv('MAX_COMFY_START_ATTEMPTS') is not None else 10  # Set this to the maximum number of connection attempts to ComfyUI you want
 COMFY_START_ATTEMPTS_SLEEP = float(os.getenv('COMFY_START_ATTEMPTS_SLEEP')) if os.getenv('COMFY_START_ATTEMPTS_SLEEP') is not None else 1 # The waiting time for each reattempt to connect to ComfyUI
 
 INSTANCE_IDENTIFIER = APP_NAME+'-'+str(uuid.uuid4()) # Unique identifier for this instance of the worker; used in the WebSocket connection
 
-class ComfyConnector:
+class ComfyAPI:
     _instance = None
     _process = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super(ComfyConnector, cls).__new__(cls)
+            cls._instance = super(ComfyAPI, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self):
-        if not hasattr(self, 'initialized'):
-            self.urlport = self.find_available_port()
-            self.server_address = f"http://{API_URL}:{self.urlport}"
-            self.client_id = INSTANCE_IDENTIFIER
-            self.ws_address = f"ws://{API_URL}:{self.urlport}/ws?clientId={self.client_id}"
-            self.ws = WebSocket()
-            self.start_api()
-            self.initialized = True
-
-    def find_available_port(self): # If the initial port is already in use, this method finds an available port to start the API server on
-        port = INITIAL_PORT
-        while True:
-            try:
-                response = requests.get(f'http://{API_URL}:{port}')
-                if response.status_code != 200:
-                    return port
-                else:
-                    port += 1
-            except requests.ConnectionError:
-                return port
-    
-    def start_api(self): # This method is used to start the API server
-        if not self.is_api_running(): # Block execution until the API server is running
-            api_command_line = API_COMMAND_LINE + f" --port {self.urlport}" # Add the port to the command line
-            if self._process is None or self._process.poll() is not None: # Check if the process is not running or has terminated for some reason
-                self._process = subprocess.Popen(api_command_line.split())
-                print("API process started with PID:", self._process.pid)
-                attempts = 0
-                while not self.is_api_running(): # Block execution until the API server is running
-                    if attempts >= MAX_COMFY_START_ATTEMPTS:
-                        raise RuntimeError(f"API startup procedure failed after {attempts} attempts.")
-                    time.sleep(COMFY_START_ATTEMPTS_SLEEP)  # Wait before checking again, for 1 second by default
-                    attempts += 1 # Increment the number of attempts
-                print(f"API startup procedure finalized after {attempts} attempts with PID {self._process.pid} in port {self.urlport}")
-                time.sleep(0.5)  # Wait for 0.5 seconds before returning
+    def __init__(self, url="localhost:7777"):
+        self.server_address = "https://"+url
+        self.client_id = INSTANCE_IDENTIFIER
+        self.ws_address = f"ws://{url}/ws?clientId={self.client_id}"
+        self.ws = WebSocket()
 
     def is_api_running(self): # This method is used to check if the API server is running
         test_payload = TEST_PAYLOAD
@@ -87,26 +54,6 @@ class ComfyConnector:
             print("API not running:", e)
             return False
 
-    def kill_api(self):
-        # This method kills the API server process, closes the WebSocket connection, and resets instance-specific attributes.
-        try:
-            if self._process is not None and self._process.poll() is None:
-                self._process.kill()
-                print("kill_api: API process killed.")
-            if self.ws and self.ws.connected:
-                self.ws.close()
-                print("kill_api: WebSocket connection closed.")
-        except Exception as e:
-            print(f"kill_api: Warning: The following issues occurred: {e}")
-        finally:
-            self._process = None
-            self.ws = None            
-            self.urlport = None
-            self.server_address = None
-            self.client_id = None
-            ComfyConnector._instance = None
-            print("kill_api: Cleanup complete.")
-
     def get_history(self, prompt_id): # This method is used to retrieve the history of a prompt from the API server
         with urllib.request.urlopen(f"{self.server_address}/history/{prompt_id}") as response:
             return json.loads(response.read())
@@ -124,7 +71,7 @@ class ComfyConnector:
         req = urllib.request.Request(f"{self.server_address}/prompt", data=data, headers=headers)
         return json.loads(urllib.request.urlopen(req).read())
 
-    def generate_images(self, payload): # This method is used to generate images from a prompt and is the main method of this class
+    def generate_images(self, payload, delete=True): # This method is used to generate images from a prompt and is the main method of this class
         try:
             if not self.ws.connected: # Check if the WebSocket is connected to the API server and reconnect if necessary
                 print("WebSocket is not connected. Reconnecting...")
@@ -149,6 +96,8 @@ class ComfyConnector:
                 image_data = self.get_image(filename, subfolder, folder_type)
                 image_file = io.BytesIO(image_data)
                 image = Image.open(image_file)
+                if delete:
+                    os.remove(image_file)
                 images.append(image)
             return images
         except Exception as e:
