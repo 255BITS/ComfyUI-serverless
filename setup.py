@@ -16,8 +16,11 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.11',
     install_requires=[
-        # Add any dependencies your comfyui_api might have
+        'Pillow>=13.0.0',
+        'certifi>=2026.10.19',
+        'requests>=2.33.0',
+        'websocket-client>=1.8.0',
     ],
 )

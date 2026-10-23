@@ -68,15 +68,19 @@ class ComfyAPI:
                         break
         address = self.find_output_node(payload) # Find the SaveImage node; workflow MUST contain only one SaveImage node
         history = self.get_history(prompt_id)[prompt_id]
-        filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
+        if address is None:
+            raise ValueError("The workflow has no SaveImage output")
+        output = history['outputs']
+        for key in address:
+            output = output[key]
+        filenames = output['images']
         images = []
         for img_info in filenames:
             filename = img_info['filename']
             subfolder = img_info['subfolder']
             folder_type = img_info['type']
             image_data = self.get_image(filename, subfolder, folder_type)
-            image_file = io.BytesIO(image_data)
-            image = Image.open(image_file)
+            image = self._decode_image(image_data)
             if delete:
                 #print("REM", filename, subfolder)
                 #os.remove(image_file)
@@ -84,6 +88,16 @@ class ComfyAPI:
                 pass
             images.append(image)
         return images
+
+    @staticmethod
+    def _decode_image(image_data):
+        if len(image_data) > 32 * 1024 * 1024:
+            raise ValueError("Generated image exceeds the 32 MiB input limit")
+        with Image.open(io.BytesIO(image_data), formats=("PNG", "JPEG", "WEBP", "GIF")) as image:
+            if image.width * image.height > 16_777_216:
+                raise ValueError("Generated image exceeds the pixel limit")
+            image.load()
+            return image.copy()
 
     def upload_image(self, filepath, subfolder=None, folder_type=None, overwrite=False):  # This method is used to upload an image to the API server for use in img2img or controlnet
         try: 
@@ -105,10 +119,10 @@ class ComfyAPI:
         for key, value in json_object.items():
             if isinstance(value, dict):
                 if value.get("class_type") == "SaveImage":
-                    return f"['{key}']"  # Return the key containing the SaveImage class
+                    return [key]
                 result = ComfyAPI.find_output_node(value)
                 if result:
-                    return result
+                    return [key, *result]
         return None
     
     @staticmethod
