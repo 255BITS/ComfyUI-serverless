@@ -1,6 +1,11 @@
 # ComfyUI-serverless
 _**A connector to use ComfyUI in serverless deployments**_
 
+Requires Python 3.11 or newer. Install this package so its patched Pillow and
+certificate-bundle requirements are applied. Generated images are limited to
+PNG, JPEG, WebP or GIF, 32 MiB encoded, and 16,777,216 pixels. Workflow output
+keys are treated as literal data rather than evaluated Python expressions.
+
 ComfyUI is incredibly flexible and fast; it is the perfect tool launch new workflows in serverless deployments. Unfortunately, there isn't a lot on API documentation and the examples that have been offered so far don't deal with some important issues (for example: good ways to pass images to Comfy, generalized handling of API json files, etc).
 
 Using the websocket endpoint that Comfy offers, I created a very simple way to generate images from Comfy via code. With the ComfyConnector class, you may:
